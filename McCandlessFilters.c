@@ -132,7 +132,6 @@ int main(int argc, char *argv[]) {
         else
           // do nothing
           break;
-      case '?':
       default:
         fprintf(stderr, "Usage: %s -i <input file> -o <output file> -f <filter>\n", argv[0]);
 
