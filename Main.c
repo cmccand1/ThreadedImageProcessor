@@ -10,140 +10,228 @@
 
 typedef void *(*filter_method)(void *);
 
+/**
+ * Structure to hold program options.
+ */
+typedef struct {
+  FILE *input_file;          /**< Input file pointer */
+  FILE *output_file;         /**< Output file pointer */
+  filter_method filter_func; /**< Function pointer to the filter method */
+  int rShift;                /**< Red color shift value */
+  int gShift;                /**< Green color shift value */
+  int bShift;                /**< Blue color shift value */
+} ProgramOptions;
+
+/**
+ * Display usage information for the program.
+ * @param argv Array of command-line arguments.
+ */
 void display_usage(char **argv);
 
-int init_thread_data(struct thread_data ***thread_data, const Image *image, const int *, const int*, const int*);
+/**
+ * Initialize thread data for image processing.
+ * @param thread_data Pointer to the thread data array.
+ * @param image Pointer to the image structure.
+ * @param rShift Pointer to the red color shift value.
+ * @param gShift Pointer to the green color shift value.
+ * @param bShift Pointer to the blue color shift value.
+ * @return EXIT_SUCCESS on success, EXIT_FAILURE on failure.
+ */
+int init_thread_data(struct thread_data ***thread_data, const Image *image,
+                     const int *rShift, const int *gShift, const int *bShift);
 
-void process_user_args(int argc, char **argv, FILE **input_file,
-                       FILE **output_file, filter_method *filter_func,
-                       int *rShift, int *gShift, int *bShift);
+/**
+ * Process user arguments and populate program options.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @param options Pointer to the ProgramOptions structure.
+ */
+void process_user_args(int argc, char **argv, ProgramOptions *options);
 
+/**
+ * Extract input image data from the input file.
+ * @param input_file Pointer to the input file.
+ * @param input_pixels Pointer to the 2D array of input pixels.
+ * @param BMP Pointer to the BMP header structure.
+ * @param DIB Pointer to the DIB header structure.
+ */
 void extract_input_image_data(FILE *input_file, struct Pixel ***input_pixels,
                               struct BMP_Header *BMP, struct DIB_Header *DIB);
 
+/**
+ * Write the output file with the filtered image.
+ * @param output_file Pointer to the output file.
+ * @param image Pointer to the image structure.
+ * @param new_pixels Pointer to the 2D array of new pixels.
+ * @param BMP BMP header structure.
+ * @param DIB DIB header structure.
+ */
 void write_output_file(FILE *output_file, const Image *image,
                        struct Pixel **new_pixels, struct BMP_Header BMP,
                        struct DIB_Header DIB);
 
+/**
+ * Perform the specified filter on the input image.
+ * @param input_image Pointer to the input image structure.
+ * @param filter_func Function pointer to the filter method.
+ * @param job_data Pointer to the thread data array.
+ * @param tids Array of thread IDs.
+ */
 void do_filter(const Image *input_image, filter_method filter_func,
                struct thread_data ***job_data, pthread_t tids[THREAD_COUNT]);
 
+/**
+ * Write the output pixels to the output pixel array.
+ * @param output_pixels Pointer to the 2D array of output pixels.
+ * @param job_data Pointer to the thread data array.
+ */
 void write_output_pixels(struct Pixel **output_pixels,
                          struct thread_data **job_data);
 
+/**
+ * Initialize the input image from the input file.
+ * @param input_file Pointer to the input file.
+ * @param input_image Pointer to the input image structure.
+ * @param BMP Pointer to the BMP header structure.
+ * @param DIB Pointer to the DIB header structure.
+ */
+void initialize_input_image(FILE *input_file, Image **input_image,
+                            struct BMP_Header *BMP, struct DIB_Header *DIB);
+
+/**
+ * Perform the filtering process on the input image.
+ * @param input_image Pointer to the input image structure.
+ * @param job_data Pointer to the thread data array.
+ * @param tids Array of thread IDs.
+ * @param options Pointer to the ProgramOptions structure.
+ */
+void perform_filtering(const Image *input_image, struct thread_data ***job_data,
+                       pthread_t tids[THREAD_COUNT],
+                       const ProgramOptions *options);
+
+/**
+ * Clean up resources allocated during the program execution.
+ * @param input_image Pointer to the input image structure.
+ * @param output_image Pointer to the output image structure.
+ * @param job_data Pointer to the thread data array.
+ */
+void cleanup_resources(Image *input_image, Image *output_image,
+                       struct thread_data **job_data);
+
+/**
+ * Write the output image to the output file.
+ * @param output_file Pointer to the output file.
+ * @param input_image Pointer to the input image structure.
+ * @param job_data Pointer to the thread data array.
+ * @param output_image Pointer to the output image structure.
+ * @param BMP Pointer to the BMP header structure.
+ * @param DIB Pointer to the DIB header structure.
+ */
+void write_output(FILE *output_file, const Image *input_image,
+                  struct thread_data **job_data, Image **output_image,
+                  const struct BMP_Header *BMP, const struct DIB_Header *DIB);
+
 int main(int argc, char *argv[]) {
-  // Image headers (input and output)
+  // Define program options
+  ProgramOptions options = {0};
+
+  // Parse user arguments
+  process_user_args(argc, argv, &options);
+
+  // Load input image
   struct BMP_Header BMP;
   struct DIB_Header DIB;
+  Image *input_image = NULL;
+  initialize_input_image(options.input_file, &input_image, &BMP, &DIB);
 
-  // Input data
-  FILE *input_file = NULL;
-  struct Pixel **input_pixels;
-  Image *input_image;
-
-  // Output data
-  FILE *output_file = NULL;
-  struct Pixel **output_pixels;
-  Image *output_image;
-
-  // Thread data
-  filter_method filter_func;
-  struct thread_data **job_data;
+  // Perform filtering
+  struct thread_data **job_data = NULL;
   pthread_t tids[THREAD_COUNT];
-  int rShift, gShift, bShift;
+  perform_filtering(input_image, &job_data, tids, &options);
 
-  // init based on user input, terminating if invalid
-  process_user_args(argc, argv, &input_file, &output_file, &filter_func,
-                    &rShift, &gShift, &bShift);
+  // Write output
+  Image *output_image = NULL;
+  write_output(options.output_file, input_image, job_data, &output_image, &BMP,
+               &DIB);
 
-  printf("rShift: %d\ngShift: %d\nbShift: %d\n", rShift, gShift, bShift);
+  // Clean up resources
+  cleanup_resources(input_image, output_image, job_data);
 
-  // get the data from the input file
-  extract_input_image_data(input_file, &input_pixels, &BMP, &DIB);
+  return EXIT_SUCCESS;
+}
 
-  // create the image from the pixel array
-  input_image =
-      image_create(input_pixels, DIB.image_width_w, DIB.image_height_h);
+void cleanup_resources(Image *input_image, Image *output_image,
+                       struct thread_data **job_data) {
+  // Free input and output images
+  image_destroy(&input_image);
+  image_destroy(&output_image);
 
-  // perform the filtering operation. the results will be in the job_data
-  // structs
-  // do_filter(input_image, filter_func, &job_data, tids);
+  // Free thread data
+  for (int i = 0; i < THREAD_COUNT; ++i) {
+    free_pixel_array_2d(job_data[i]->thread_pixel_array, job_data[i]->height);
+    free(job_data[i]);
+  }
+  free(job_data);
+}
 
-  if (init_thread_data(&job_data, input_image, &rShift, &gShift, &bShift) !=
-      EXIT_SUCCESS) {
+void write_output(FILE *output_file, const Image *input_image,
+                  struct thread_data **job_data, Image **output_image,
+                  const struct BMP_Header *BMP, const struct DIB_Header *DIB) {
+  // Create output pixel array
+  struct Pixel **output_pixels =
+      create_pixel_array_2d(input_image->width, input_image->height);
+  write_output_pixels(output_pixels, job_data);
+
+  // Create the output image
+  *output_image =
+      image_create(output_pixels, input_image->width, input_image->height);
+
+  // Write the output file
+  write_output_file(output_file, *output_image, output_pixels, *BMP, *DIB);
+}
+
+void perform_filtering(const Image *input_image, struct thread_data ***job_data,
+                       pthread_t tids[THREAD_COUNT],
+                       const ProgramOptions *options) {
+  // Initialize thread data
+  if (init_thread_data(job_data, input_image, &options->rShift,
+                       &options->gShift, &options->bShift) != EXIT_SUCCESS) {
     perror("Error initializing thread info.");
     exit(EXIT_FAILURE);
   }
 
-  // create the threads, which call filter with error handling
+  // Perform filtering
   for (int i = 0; i < THREAD_COUNT; ++i) {
-    if (pthread_create(&tids[i], NULL, filter_func, job_data[i]) !=
+    if (pthread_create(&tids[i], NULL, options->filter_func, (*job_data)[i]) !=
         EXIT_SUCCESS) {
       perror("Error creating thread.");
       exit(EXIT_FAILURE);
     }
   }
 
-  // wait for all threads to finish, with error handling
+  // Wait for threads to finish
   for (int i = 0; i < THREAD_COUNT; ++i) {
     if (pthread_join(tids[i], NULL) != EXIT_SUCCESS) {
       perror("Error joining thread.");
       exit(EXIT_FAILURE);
     }
   }
-
-  // Stitch together the pixel array from each thread
-  output_pixels = create_pixel_array_2d(DIB.image_width_w, DIB.image_height_h);
-  write_output_pixels(output_pixels, job_data);
-
-  // write the output file and clean up
-  output_image =
-      image_create(output_pixels, DIB.image_width_w, DIB.image_height_h);
-  write_output_file(output_file, output_image, output_pixels, BMP, DIB);
-
-  // clean up
-  for (int i = 0; i < THREAD_COUNT; ++i) {
-    free_pixel_array_2d(job_data[i]->thread_pixel_array, job_data[i]->height);
-    // free the thread_info struct
-    free(job_data[i]);
-    job_data[i] = NULL;
-  }
-  free(job_data);
-  job_data = NULL;
-
-  image_destroy(&input_image);
-  image_destroy(&output_image);
-  return 0;
 }
 
-// void do_filter(const Image *input_image, const filter_method filter_func,
-//                struct thread_data ***job_data, pthread_t tids[THREAD_COUNT]) {
-//   // set up the thread jobs
-//   if (init_thread_data(job_data, input_image) != EXIT_SUCCESS) {
-//     perror("Error initializing thread info.");
-//     exit(EXIT_FAILURE);
-//   }
-//
-//   // create the threads, which call filter with error handling
-//   for (int i = 0; i < THREAD_COUNT; ++i) {
-//     if (pthread_create(&tids[i], NULL, filter_func, (*job_data)[i]) !=
-//         EXIT_SUCCESS) {
-//       perror("Error creating thread.");
-//       exit(EXIT_FAILURE);
-//     }
-//   }
-//
-//   // wait for all threads to finish, with error handling
-//   for (int i = 0; i < THREAD_COUNT; ++i) {
-//     if (pthread_join(tids[i], NULL) != EXIT_SUCCESS) {
-//       perror("Error joining thread.");
-//       exit(EXIT_FAILURE);
-//     }
-//   }
-// }
+void initialize_input_image(FILE *input_file, Image **input_image,
+                            struct BMP_Header *BMP, struct DIB_Header *DIB) {
+  struct Pixel **pixels;
+
+  // Extract input pixels
+  extract_input_image_data(input_file, &pixels, BMP, DIB);
+
+  // Create input image
+  *input_image = image_create(pixels, DIB->image_width_w, DIB->image_height_h);
+}
 
 void write_output_pixels(struct Pixel **output_pixels,
                          struct thread_data **job_data) {
+  // Copy thread pixel arrays to output pixel array
   for (int i = 0; i < THREAD_COUNT; ++i) {
     for (int row = 0; row < job_data[i]->height; ++row) {
       for (int col = job_data[i]->start; col <= job_data[i]->end; ++col) {
@@ -156,7 +244,7 @@ void write_output_pixels(struct Pixel **output_pixels,
 
 int init_thread_data(struct thread_data ***thread_data, const Image *image,
                      const int *rShift, const int *gShift, const int *bShift) {
-  // Allocate array of thread_data pointers
+  // Allocate memory for thread_data pointers
   if ((*thread_data = malloc(sizeof(struct thread_data *) * THREAD_COUNT)) ==
       NULL) {
     perror("Error while allocating memory for thread_info pointers.");
@@ -167,6 +255,7 @@ int init_thread_data(struct thread_data ***thread_data, const Image *image,
   const int width_per_thread = image->width / THREAD_COUNT;
   const int remaining_width = image->width % THREAD_COUNT;
 
+  // Log for debugging
   printf("Thread count: %d\n", THREAD_COUNT);
   printf("Width per thread: %d, remainder: %d\n", width_per_thread,
          remaining_width);
@@ -199,11 +288,11 @@ int init_thread_data(struct thread_data ***thread_data, const Image *image,
       (*thread_data)[i]->end = (*thread_data)[i]->start + width_per_thread - 1;
     }
 
-    // Calculate actual width for this thread's section
+    // Calculate thread's width
     (*thread_data)[i]->width =
         (*thread_data)[i]->end - (*thread_data)[i]->start + 1;
 
-    // Allocate thread's pixel array with correct dimensions
+    // Allocate memory for thread pixel array
     if (((*thread_data)[i]->thread_pixel_array = create_pixel_array_2d(
              (*thread_data)[i]->width, (*thread_data)[i]->height)) == NULL) {
       perror("Error while allocating memory for thread_info pixel array.");
@@ -218,15 +307,8 @@ int init_thread_data(struct thread_data ***thread_data, const Image *image,
   return EXIT_SUCCESS;
 }
 
-void process_user_args(int argc, char **argv, FILE **input_file,
-                       FILE **output_file, filter_method *filter_func,
-                       int *rShift, int *gShift, int *bShift) {
+void process_user_args(int argc, char **argv, ProgramOptions *options) {
   int opt;
-  optarg = NULL;
-  *rShift = 0;
-  *gShift = 0;
-  *bShift = 0;
-
   while ((opt = getopt(argc, argv, "i:o:f:r:g:b:")) != -1) {
     // if (argc != 6 + 1) {
     //   fprintf(stderr, "Expected 6 arguments, got %d instead.\n", argc - 1);
@@ -235,33 +317,30 @@ void process_user_args(int argc, char **argv, FILE **input_file,
     // }
     switch (opt) {
       case 'i':
-        // open the input file to read binary
-        if ((*input_file = fopen(optarg, "rb")) == NULL) {
+        if ((options->input_file = fopen(optarg, "rb")) == NULL) {
           perror("Input file could not be opened.");
           exit(EXIT_FAILURE);
         }
         break;
       case 'o':
-        // create an output file to write binary
-        if ((*output_file = fopen(optarg, "wb")) == NULL) {
+        if ((options->output_file = fopen(optarg, "wb")) == NULL) {
           perror("Output file could not be opened.");
           exit(EXIT_FAILURE);
         }
         break;
       case 'f':
-        // set which filtering procedure to use
         switch (optarg[0]) {
           case 'b':
-            *filter_func = image_apply_t_boxblur;
+            options->filter_func = image_apply_t_boxblur;
             break;
           case 'c':
-            *filter_func = image_apply_t_cheese;
+            options->filter_func = image_apply_t_cheese;
             break;
           case 'g':
-            *filter_func = image_apply_t_bw;
+            options->filter_func = image_apply_t_bw;
             break;
           case 's':
-            *filter_func = image_apply_t_colorshift;
+            options->filter_func = image_apply_t_colorshift;
             break;
           default:
             fprintf(stderr, "Invalid filter type: %s\n", optarg);
@@ -270,13 +349,13 @@ void process_user_args(int argc, char **argv, FILE **input_file,
         }
         break;
       case 'r':
-        *rShift = atoi(optarg);
+        options->rShift = atoi(optarg);
         break;
       case 'g':
-        *gShift = atoi(optarg);
+        options->gShift = atoi(optarg);
         break;
       case 'b':
-        *bShift = atoi(optarg);
+        options->bShift = atoi(optarg);
         break;
       default:
         fprintf(stderr, "Invalid option: %c\n", opt);
@@ -288,28 +367,41 @@ void process_user_args(int argc, char **argv, FILE **input_file,
 
 void extract_input_image_data(FILE *input_file, struct Pixel ***input_pixels,
                               struct BMP_Header *BMP, struct DIB_Header *DIB) {
-  // read BMP header and DIB header from input file
+  // read headers from input file
   readBMPHeader(input_file, BMP);
   readDIBHeader(input_file, DIB);
 
+  // allocate memory for input pixel array
   *input_pixels =
       create_pixel_array_2d(DIB->image_width_w, DIB->image_height_h);
 
-  // readPixels into pixel array
+  // read pixels from input file
   readPixelsBMP(input_file, *input_pixels, DIB->image_width_w,
                 DIB->image_height_h);
+  // close input file
   fclose(input_file);
 }
 
+/**
+ * Write the output file with the filtered image.
+ * @param output_file the output file to write to
+ * @param image the image to write to the output file
+ * @param new_pixels the new pixels to write to the output file
+ * @param BMP the BMP header for the output image
+ * @param DIB the DIB header for the output image
+ */
 void write_output_file(FILE *output_file, const Image *image,
                        struct Pixel **new_pixels, const struct BMP_Header BMP,
                        const struct DIB_Header DIB) {
-  // write new headers and pixels to output file
+  // write headers to output file
   writeBMPHeader(output_file, &BMP);
   writeDIBHeader(output_file, &DIB);
+
+  // write pixels to output file
   writePixelsBMP(output_file, new_pixels, image_get_width(image),
                  image_get_height(image));
 
+  // close output file
   fclose(output_file);
 }
 
