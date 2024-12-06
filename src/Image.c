@@ -103,59 +103,14 @@ int image_get_width(const Image *img) { return img->width; }
  */
 int image_get_height(const Image *img) { return img->height; }
 
-/** Converts the image to grayscale.
- *
- * @param  img: the image.
- */
-void image_apply_bw(const Image *img) {
-  // get a pointer to the first pixel in the pixel array
-  struct Pixel **pixels = img->pixel_array;
-  // for each pixel, change each RGB component to the same value
-  for (int i = 0; i < img->width; ++i) {
-    for (int j = 0; j < img->height; ++j) {
-      // calculate the grayscale value
-      const unsigned char GRAYSCALE_VALUE = (0.299 * pixels[i][j].r) +
-                                            (0.587 * pixels[i][j].g) +
-                                            (0.114 * pixels[i][j].b);
-      // set each RGB component to the calculated grayscale value
-      pixels[i][j].r = GRAYSCALE_VALUE;
-      pixels[i][j].g = GRAYSCALE_VALUE;
-      pixels[i][j].b = GRAYSCALE_VALUE;
-    }
-  }
-}
-
-/**
- * Shift color of the internal Pixel array. The dimension of the array is width
- * * height. The shift value of RGB is rShift, gShift，bShift. Useful for color
- * shift.
- *
- * @param  img: the image.
- * @param  rShift: the shift value of color r shift
- * @param  gShift: the shift value of color g shift
- * @param  bShift: the shift value of color b shift
- */
-void image_apply_colorshift(const Image *img, int rShift, int gShift,
-                            int bShift) {
-  // get a pointer to the first pixel in the pixel array
-  struct Pixel **pixels = img->pixel_array;
-  for (int i = 0; i < img->width; ++i) {
-    for (int j = 0; j < img->height; ++j) {
-      pixels[i][j].r = clamp_to_uchar(pixels[i][j].r + rShift);
-      pixels[i][j].g = clamp_to_uchar(pixels[i][j].g + gShift);
-      pixels[i][j].b = clamp_to_uchar(pixels[i][j].b + bShift);
-    }
-  }
-}
-
 /**
  * Applies the swiss cheese filter to the image.
  * @param img the image to filter
  */
 void image_apply_cheese(const Image *img) {
   // tint the image yellow ;P
-  image_apply_bw(img);
-  image_apply_colorshift(img, 150, 150, 0);
+  // image_apply_bw(img);
+  // image_apply_colorshift(img, 150, 150, 0);
   const int min_dimension = min(img->width, img->height);
   srand(time(NULL));
   for (int i = 0; i < NUM_HOLES(min_dimension); ++i) {
@@ -168,6 +123,46 @@ void image_apply_cheese(const Image *img) {
     flood_fill(img, h, k, radius, h, k);
   }
   printf("swiss cheese applied\n");
+}
+
+void *image_apply_t_colorshift(void *data) {
+  const struct thread_data *thread_data = (struct thread_data *)data;
+
+  const struct Pixel **read_pixels = thread_data->og_image->pixel_array;
+  struct Pixel **write_pixels = thread_data->thread_pixel_array;
+
+  for (int i = 0; i < thread_data->height; ++i) {
+    for (int j = thread_data->start; j <= thread_data->end; ++j) {
+      write_pixels[i][j - thread_data->start].r =
+          clamp_to_uchar(read_pixels[i][j].r + thread_data->rShift);
+      write_pixels[i][j - thread_data->start].g =
+          clamp_to_uchar(read_pixels[i][j].g + thread_data->gShift);
+      write_pixels[i][j - thread_data->start].b =
+          clamp_to_uchar(read_pixels[i][j].b + thread_data->bShift);
+    }
+  }
+  pthread_exit(NULL);
+}
+
+void *image_apply_t_bw(void *data) {
+  const struct thread_data *thread_data = (struct thread_data *)data;
+
+  const struct Pixel **read_pixels = thread_data->og_image->pixel_array;
+  struct Pixel **write_pixels = thread_data->thread_pixel_array;
+
+  for (int i = 0; i < thread_data->height; ++i) {
+    for (int j = thread_data->start; j <= thread_data->end; ++j) {
+      const unsigned char GRAYSCALE_VALUE = (0.299 * read_pixels[i][j].r) +
+                                            (0.587 * read_pixels[i][j].g) +
+                                            (0.114 * read_pixels[i][j].b);
+
+      // set each RGB component to the calculated grayscale value
+      write_pixels[i][j - thread_data->start].r = GRAYSCALE_VALUE;
+      write_pixels[i][j - thread_data->start].g = GRAYSCALE_VALUE;
+      write_pixels[i][j - thread_data->start].b = GRAYSCALE_VALUE;
+    }
+  }
+  pthread_exit(NULL);
 }
 
 void *image_apply_t_cheese(void *data) {}

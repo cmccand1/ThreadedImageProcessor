@@ -1,11 +1,11 @@
 ﻿/**
-* Specification for an image ADT.
-*
-* Completion time: ?
-*
-* @author Clint McCandless, Ruben Acuna
-* @version 9/9/2021
-*/
+ * Specification for an image ADT.
+ *
+ * Completion time: ?
+ *
+ * @author Clint McCandless, Ruben Acuna
+ * @version 9/9/2021
+ */
 
 #ifndef PixelProcessor_H
 #define PixelProcessor_H
@@ -31,7 +31,7 @@
 #define BMP_HEADER_SIZE 14
 #define BMP_DIB_HEADER_SIZE 40
 #define MAXIMUM_IMAGE_SIZE 4096
-#define KERNEL_SIZE 5 // NxN kernel size for box blur. Must be odd to be square
+#define KERNEL_SIZE 5  // NxN kernel size for box blur. Must be odd to be square
 #define THREAD_COUNT 12
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -39,69 +39,65 @@
 typedef struct Image Image;
 
 struct Image {
-    struct Pixel **pixel_array;
-    int width;
-    int height;
+  struct Pixel **pixel_array;
+  int width;
+  int height;
 };
 
 struct Pixel {
-    unsigned char r; // 8-bit rvalue
-    unsigned char g; // 8-bit gvalue
-    unsigned char b; // 8-bit bvalue
+  unsigned char r;  // 8-bit rvalue
+  unsigned char g;  // 8-bit gvalue
+  unsigned char b;  // 8-bit bvalue
 };
 
 struct thread_data {
-    struct Pixel **thread_pixel_array; // the smaller pixel array that this thread owns
-    int width, height;
-    const Image *og_image;
-    int start, end; // the index of where this threads window onto the og_image starts/ends
+  struct Pixel *
+      *thread_pixel_array;  // the smaller pixel array that this thread owns
+  int width, height;
+  const Image *og_image;
+  int start, end;  // the index of where this threads window onto the og_image starts/ends
+  int rShift, gShift, bShift;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
-//Function Declarations
+// Function Declarations
 
 struct Pixel **create_pixel_array_2d(int width, int height);
 
 void free_pixel_array_2d(struct Pixel **array, int height);
 
 /** Creates a new image and returns it.
-* 
+ *
  * @param  pArr: Pixel array of this image.
  * @param  width: Width of this image.
  * @param  height: Height of this image.
  * @return A pointer to a new image.
-*/
+ */
 Image *image_create(struct Pixel **pArr, int width, int height);
 
 /** Destroys an image. Does not deallocate internal pixel array.
-* 
-* @param  img: the image to destroy.
-*/
+ *
+ * @param  img: the image to destroy.
+ */
 void image_destroy(Image **img);
 
 /** Returns a double pointer to the pixel array.
-*
-* @param  img: the image.
-*/
+ *
+ * @param  img: the image.
+ */
 struct Pixel **image_get_pixels(const Image *img);
 
 /** Returns the width of the image.
-*
-* @param  img: the image.
-*/
+ *
+ * @param  img: the image.
+ */
 int image_get_width(const Image *img);
 
 /** Returns the height of the image.
-*
-* @param  img: the image.
-*/
+ *
+ * @param  img: the image.
+ */
 int image_get_height(const Image *img);
-
-/** Converts the image to grayscale.
-*
-* @param  img: the image.
-*/
-void image_apply_bw(const Image *img);
 
 /**
  * Apply a cheese filter to the image. The cheese filter will apply a yellow
@@ -110,28 +106,21 @@ void image_apply_bw(const Image *img);
  */
 void image_apply_cheese(const Image *img);
 
+void *image_apply_t_bw(void *data);
+
 void *image_apply_t_cheese(void *data);
 
 void *image_apply_t_boxblur(void *data);
 
-/**
- * Shift color of the internal Pixel array. The dimension of the array is width * height.
- * The shift value of RGB is rShift, gShift，bShift. Useful for color shift.
- *
- * @param  img: the image.
- * @param  rShift: the shift value of color r shift
- * @param  gShift: the shift value of color g shift
- * @param  bShift: the shift value of color b shift
- */
-void image_apply_colorshift(const Image *img, int rShift, int gShift, int bShift);
+void *image_apply_t_colorshift(void *data);
 
 /**
- * Converts the image to grayscale. If the scaling factor is less than 1 the new image will be
- * smaller, if it is larger than 1, the new image will be larger.
+ * Converts the image to grayscale. If the scaling factor is less than 1 the new
+ * image will be smaller, if it is larger than 1, the new image will be larger.
  *
  * @param  img: the image.
  * @param  factor: the scaling factor
-*/
+ */
 void image_apply_resize(Image *img, float factor);
 
 #endif
