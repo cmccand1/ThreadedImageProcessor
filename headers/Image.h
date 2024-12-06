@@ -31,7 +31,7 @@
 #define BMP_HEADER_SIZE 14
 #define BMP_DIB_HEADER_SIZE 40
 #define MAXIMUM_IMAGE_SIZE 4096
-#define NEIGHBORHOOD_SIZE 3
+#define KERNEL_SIZE 5 // NxN kernel size for box blur. Must be odd to be square
 #define THREAD_COUNT 12
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -39,28 +39,22 @@
 typedef struct Image Image;
 
 struct Image {
-  struct Pixel **pixel_array;
-  int width;
-  int height;
+    struct Pixel **pixel_array;
+    int width;
+    int height;
 };
 
 struct Pixel {
-  unsigned char r; // 8-bit rvalue
-  unsigned char g; // 8-bit gvalue
-  unsigned char b; // 8-bit bvalue
+    unsigned char r; // 8-bit rvalue
+    unsigned char g; // 8-bit gvalue
+    unsigned char b; // 8-bit bvalue
 };
 
-enum Filter { BOXBLUR, CHEESE };
-
-struct thread_info {
-  enum Filter filter_type;
-  struct Pixel *
-      *thread_pixel_array;  // the smaller pixel array that this thread owns
-  int width, height;
-  Image *og_image;  // pointer to the image we're modifying from this thread
-  int start,
-      end;  // the index of where this threads window onto the og_image
-            // starts/ends
+struct thread_data {
+    struct Pixel **thread_pixel_array; // the smaller pixel array that this thread owns
+    int width, height;
+    const Image *og_image;
+    int start, end; // the index of where this threads window onto the og_image starts/ends
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -115,6 +109,8 @@ void image_apply_bw(const Image *img);
  * @param img the image to filter
  */
 void image_apply_cheese(const Image *img);
+
+void *image_apply_t_cheese(void *data);
 
 void *image_apply_t_boxblur(void *data);
 

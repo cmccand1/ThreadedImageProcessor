@@ -1,234 +1,248 @@
-/**
- * (basic description of the program or class)
- *
- * Completion time: (estimation of hours spent on this program)
- *
- * @author Clint McCandless
- * @version 11/8/23
- */
-
-////////////////////////////////////////////////////////////////////////////////
-// INCLUDES
 #include <assert.h>
 #include <getopt.h>
 #include <math.h>
 #include <pthread.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "headers/BMPHandler.h"
 #include "headers/Image.h"
 
-int pixel_in_bounds(const Image *img, int row, int col);
-typedef enum Filter Filter;
-void *t_filter(void *data);
-int init_thread_info(struct thread_info ***thread_infos, Image *image);
 
-Filter filter_type;
+typedef void * (*filter_method)(void *);
+
+void display_usage(char **argv);
+
+int init_thread_data(struct thread_data ***thread_data, const Image *image);
+
+void process_user_args(int argc, char **argv, FILE **input_file, FILE **output_file, filter_method*filter_func);
+
+void extract_input_image_data(FILE *input_file, struct Pixel ***input_pixels, struct BMP_Header *BMP, struct DIB_Header *DIB);
+
+void write_output_file(FILE *output_file, Image *image, struct Pixel **new_pixels, struct BMP_Header BMP, struct DIB_Header DIB);
+
+void do_filter(Image *input_image, filter_method filter_func, struct thread_data ***job_data, pthread_t tids[THREAD_COUNT]);
+
+void write_output_pixels(struct Pixel **output_pixels, struct thread_data **job_data);
 
 int main(int argc, char *argv[]) {
-  struct BMP_Header BMP;
-  struct DIB_Header DIB;
-  FILE *input_file = NULL;
-  FILE *output_file = NULL;
-  Image *image;
-  int opt;
-  pthread_t tids[THREAD_COUNT];
+    // Image headers (input and output)
+    struct BMP_Header BMP;
+    struct DIB_Header DIB;
 
-  // get command line arguments (-i (input file), -o (output file), -f (filter))
-  // ASSUME: all CLA's will be provided and all files exist
-  optarg = NULL;
-  while ((opt = getopt(argc, argv, "i:o:f:")) != -1) {
-    if (argc != 6 + 1) {
-      fprintf(stderr,
-              "Expected 6 arguments, got %d instead.\nUsage: -i <input file> "
-              "-o <output file> -f <filter>\n",
-              argc - 1);
-      return EXIT_FAILURE;
+    // Input data
+    FILE *input_file = NULL;
+    struct Pixel **input_pixels;
+    Image *input_image;
+
+    // Output data
+    FILE *output_file = NULL;
+    struct Pixel **output_pixels;
+    Image *output_image;
+
+    // Thread data
+    filter_method filter_func;
+    struct thread_data **job_data;
+    pthread_t tids[THREAD_COUNT];
+
+
+    // init based on user input, terminating if invalid
+    process_user_args(argc, argv, &input_file, &output_file, &filter_func);
+
+    // get the data from the input file
+    extract_input_image_data(input_file, &input_pixels, &BMP, &DIB);
+
+    // create the image from the pixel array
+    input_image = image_create(input_pixels, DIB.image_width_w, DIB.image_height_h);
+
+    // perform the filtering operation. the results will be in the job_data structs
+    do_filter(input_image, filter_func, &job_data, tids);
+
+    // Stitch together the pixel array from each thread
+    output_pixels = create_pixel_array_2d(DIB.image_width_w, DIB.image_height_h);
+    write_output_pixels(output_pixels, job_data);
+
+    // write the output file and clean up
+    output_image = image_create(output_pixels, DIB.image_width_w, DIB.image_height_h);
+    write_output_file(output_file, output_image, output_pixels, BMP, DIB);
+
+    // clean up
+    for (int i = 0; i < THREAD_COUNT; ++i) {
+        free_pixel_array_2d(job_data[i]->thread_pixel_array,
+                            job_data[i]->width, job_data[i]->height);
+        // free the thread_info struct
+        free(job_data[i]);
+        job_data[i] = NULL;
     }
-    switch (opt) {
-      case 'i':
-        // open the input file to read binary
-        if ((input_file = fopen(optarg, "rb")) == NULL) {
-          perror("Input file could not be opened.");
-          return EXIT_FAILURE;
-        }
-        break;
-      case 'o':
-        // create an output file to write binary
-        if ((output_file = fopen(optarg, "wb")) == NULL) {
-          perror("Output file could not be opened.");
-          return EXIT_FAILURE;
-        }
-        break;
-      case 'f':
-        // set the filter type
-        switch (optarg[0]) {
-          case 'b':
-            filter_type = BOXBLUR;
-            break;
-          case 'c':
-            filter_type = CHEESE;
-            break;
-          default:
-            fprintf(stderr,
-                    "Usage: %s -i <input file> -o <output file> -f <filter>\n",
-                    argv[0]);
-        }
-        break;
-      default:
-        fprintf(stderr,
-                "Usage: %s -i <input file> -o <output file> -f <filter>\n",
-                argv[0]);
-    }
-  }
+    free(job_data);
+    job_data = NULL;
 
-  // read BMP header and DIB headerfrom input file
-  readBMPHeader(input_file, &BMP);
-  readDIBHeader(input_file, &DIB);
-
-  // create a 2d pixel array to hold the pixels of the image
-  struct Pixel **pixels =
-      create_pixel_array_2d(DIB.image_width_w, DIB.image_height_h);
-
-  // readPixels into pixel array
-  readPixelsBMP(input_file, pixels, DIB.image_width_w, DIB.image_height_h);
-  // close input file
-  fclose(input_file);
-  // create a new image
-  image = image_create(pixels, DIB.image_width_w, DIB.image_height_h);
-
-  // allocate enough memory for THREAD_COUNT pointers to thread_info structs
-  struct thread_info **thread_infos;
-  if (init_thread_info(&thread_infos, image) == 1) {
-    perror("Error initializing thread info.");
-    return EXIT_FAILURE;
-  }
-
-  // create the threads, which call filter
-  for (int i = 0; i < THREAD_COUNT; ++i) {
-    pthread_create(&tids[i], NULL, t_filter, thread_infos[i]);
-  }
-
-  // wait for all threads to finish
-  for (int i = 0; i < THREAD_COUNT; ++i) {
-    pthread_join(tids[i], NULL);
-  }
-
-  // write new headers and pixels to output file
-  writeBMPHeader(output_file, &BMP);
-  writeDIBHeader(output_file, &DIB);
-  writePixelsBMP(output_file, pixels, image_get_width(image),
-                 image_get_height(image));
-
-  // destroy the image
-  image_destroy(&image);
-  fclose(output_file);
-
-  // clean up
-  for (int i = 0; i < THREAD_COUNT; ++i) {
-    free_pixel_array_2d(thread_infos[i]->thread_pixel_array,
-                        thread_infos[i]->width, thread_infos[i]->height);
-    // free the thread_info struct
-    free(thread_infos[i]);
-    thread_infos[i] = NULL;
-  }
-  free(thread_infos);
-  thread_infos = NULL;
-  return 0;
+    image_destroy(&input_image);
+    image_destroy(&output_image);
+    return 0;
 }
 
-/**
- * Checks whether the pixel to look at is in the bounds of the image.
- * Used to prevent accessing memory that doesn't belong to the image array.
- * @param img: the image we're checking against
- * @param row: the row index of the pixel to check
- * @param col: the column index of the pixel to check
- * @return: 0 if the pixel is a valid pixel, 1 otherwise
- */
-int pixel_in_bounds(const Image *img, int row, int col) {
-  if (row < 0 || row >= img->height || col < 0 || col >= img->width)
-    return 1;  // indices are out of bounds
-  return 0;    // indices are within bounds
-}
-
-int init_thread_info(struct thread_info ***thread_infos, Image *image) {
-  if ((*thread_infos = malloc(sizeof(struct thread_info *) * THREAD_COUNT)) ==
-      NULL) {
-    perror("Error while allocating memory for thread_info pointers.");
-    return EXIT_FAILURE;
-  };
-
-  // for each 'tid', allocate memory for a pointer to a thread_info struct
-  for (int i = 0; i < THREAD_COUNT; ++i) {
-    if (((*thread_infos)[i] = malloc(sizeof(struct thread_info))) == NULL) {
-      perror("Error while allocating memory for thread_info struct.\n");
-      // Cleanup on failure
-      for (int j = 0; j < i; ++j) {
-        free((*thread_infos)[j]);
-      }
-      free(*thread_infos);
-      return EXIT_FAILURE;
-    };
-
-    const int width_per_thread = image->width / THREAD_COUNT + 2;
-    (*thread_infos)[i]->width = width_per_thread;
-    (*thread_infos)[i]->height = image->height;
-    // allocate memory for this threads pixel array
-    if (((*thread_infos)[i]->thread_pixel_array = create_pixel_array_2d(
-             (*thread_infos)[i]->width, (*thread_infos)[i]->height)) == NULL) {
-      perror("Error while allocating memory for thread_info pixel array.\n");
-      // Cleanup on failure
-      for (int j = 0; j < i; ++j) {
-        free((*thread_infos)[j]);
-      }
-      free(*thread_infos);
-      return EXIT_FAILURE;
-    };
-
-    (*thread_infos)[i]->og_image = image;  // reference to the og image
-    // get the image indicies that correspond to this threads window bounds
-    if (i == 0)  // first thread (hanging off left edge, i.e., -1)
-      (*thread_infos)[i]->start = -1;
-    else
-      (*thread_infos)[i]->start = (*thread_infos)[i - 1]->end - 1;
-
-    (*thread_infos)[i]->end =
-        ((*thread_infos)[i]->start + (*thread_infos)[i]->width) - 1;
-
-    // print the start and end of the window for this thread
-    printf("Thread %d: start: %d, end: %d\n", i, (*thread_infos)[i]->start,
-           (*thread_infos)[i]->end);
-    // copy the image pixels from this threads range into its pixel array
-    for (int row = 0; row < image->height; ++row) {
-      for (int col = (*thread_infos)[i]->start; col < (*thread_infos)[i]->width;
-           ++col) {
-        if (pixel_in_bounds(image, row, col) == 0) {
-          (*thread_infos)[i]->thread_pixel_array[row][col].r =
-              image->pixel_array[row][col].r;
-          (*thread_infos)[i]->thread_pixel_array[row][col].g =
-              image->pixel_array[row][col].g;
-          (*thread_infos)[i]->thread_pixel_array[row][col].b =
-              image->pixel_array[row][col].b;
-        }
-      }
+void do_filter(Image *input_image, filter_method filter_func, struct thread_data ***job_data, pthread_t tids[THREAD_COUNT]) {
+    if (init_thread_data(job_data, input_image) != EXIT_SUCCESS) {
+        perror("Error initializing thread info.");
+        exit(EXIT_FAILURE);
     }
-  }
-  return 0;
+
+    // create the threads, which call filter with error handling
+    for (int i = 0; i < THREAD_COUNT; ++i) {
+        if (pthread_create(&tids[i], NULL, filter_func, (void*)(*job_data)[i]) != EXIT_SUCCESS) {
+            perror("Error creating thread.");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    // wait for all threads to finish, with error handling
+    for (int i = 0; i < THREAD_COUNT; ++i) {
+        if (pthread_join(tids[i], NULL) != EXIT_SUCCESS) {
+            perror("Error joining thread.");
+            exit(EXIT_FAILURE);
+        }
+    }
 }
 
-void *t_filter(void *data) {
-  printf("Thread %d started\n", (int)pthread_self());
-  const struct thread_info *thread_info = (struct thread_info *)data;
-  switch (thread_info->filter_type) {
-    case BOXBLUR:
-      image_apply_t_boxblur(data);
-      break;
-    case CHEESE:
-      // image_apply_t_cheese(data);
-      break;
-    default:
-      break;
-  }
-  pthread_exit(0);
+void write_output_pixels(struct Pixel **output_pixels, struct thread_data **job_data) {
+    for (int i = 0; i < THREAD_COUNT; ++i) {
+        for (int row = 0; row < job_data[i]->height; ++row) {
+            for (int col = job_data[i]->start; col <= job_data[i]->end; ++col) {
+                output_pixels[row][col] = job_data[i]->thread_pixel_array[row][col - job_data[i]->start];
+            }
+        }
+    }
+}
+
+int init_thread_data(struct thread_data ***thread_data, const Image *image) {
+    // Allocate array of thread_data pointers
+    if ((*thread_data = malloc(sizeof(struct thread_data *) * THREAD_COUNT)) == NULL) {
+        perror("Error while allocating memory for thread_info pointers.");
+        return EXIT_FAILURE;
+    }
+
+    // Calculate width distribution among threads
+    const int width_per_thread = image->width / THREAD_COUNT;
+    const int remaining_width = image->width % THREAD_COUNT;
+
+    printf("Thread count: %d\n", THREAD_COUNT);
+    printf("Width per thread: %d, remainder: %d\n", width_per_thread, remaining_width);
+
+    for (int i = 0; i < THREAD_COUNT; ++i) {
+        // Allocate individual thread_data structure
+        if (((*thread_data)[i] = malloc(sizeof(struct thread_data))) == NULL) {
+            perror("Error while allocating memory for thread_info struct.");
+            return EXIT_FAILURE;
+        }
+
+        // Set basic thread properties
+        (*thread_data)[i]->height = image->height;
+        (*thread_data)[i]->og_image = image;
+        // (*thread_data)[i]->filter_type = filter_type;
+
+        // Calculate thread's section boundaries
+        if (i == 0) {
+            (*thread_data)[i]->start = 0;
+        } else {
+            (*thread_data)[i]->start = (*thread_data)[i - 1]->end + 1;
+        }
+
+        if (i == THREAD_COUNT - 1) {
+            // Last thread gets any remaining columns
+            (*thread_data)[i]->end = image->width - 1;
+        } else {
+            (*thread_data)[i]->end = (*thread_data)[i]->start + width_per_thread - 1;
+        }
+
+        // Calculate actual width for this thread's section
+        (*thread_data)[i]->width = (*thread_data)[i]->end - (*thread_data)[i]->start + 1;
+
+        // Allocate thread's pixel array with correct dimensions
+        if (((*thread_data)[i]->thread_pixel_array = create_pixel_array_2d(
+                 (*thread_data)[i]->width, (*thread_data)[i]->height)) == NULL) {
+            perror("Error while allocating memory for thread_info pixel array.");
+            return EXIT_FAILURE;
+        }
+
+        printf("Thread %d: start: %d, end: %d, width: %d\n",
+               i, (*thread_data)[i]->start, (*thread_data)[i]->end, (*thread_data)[i]->width);
+    }
+    return EXIT_SUCCESS;
+}
+
+void process_user_args(int argc, char **argv, FILE **input_file, FILE **output_file, filter_method*filter_func) {
+    int opt;
+    optarg = NULL;
+    while ((opt = getopt(argc, argv, "i:o:f:")) != -1) {
+        if (argc != 6 + 1) {
+            fprintf(stderr, "Expected 6 arguments, got %d instead.\n", argc - 1);
+            display_usage(argv);
+            exit(EXIT_FAILURE);
+        }
+        switch (opt) {
+            case 'i':
+                // open the input file to read binary
+                if ((*input_file = fopen(optarg, "rb")) == NULL) {
+                    perror("Input file could not be opened.");
+                    exit(EXIT_FAILURE);
+                }
+                break;
+            case 'o':
+                // create an output file to write binary
+                if ((*output_file = fopen(optarg, "wb")) == NULL) {
+                    perror("Output file could not be opened.");
+                    exit(EXIT_FAILURE);
+                }
+                break;
+            case 'f':
+                // set which filtering procedure to use
+                switch (optarg[0]) {
+                    case 'b':
+                        *filter_func = image_apply_t_boxblur;
+                        break;
+                    case 'c':
+                        *filter_func = image_apply_t_cheese;
+                        break;
+                    default:
+                        fprintf(stderr, "Invalid filter type: %s\n", optarg);
+                        display_usage(argv);
+                        exit(EXIT_FAILURE);
+                }
+                break;
+            default:
+                fprintf(stderr, "Invalid option: %c\n", opt);
+                display_usage(argv);
+                exit(EXIT_FAILURE);
+        }
+    }
+}
+
+void extract_input_image_data(FILE *input_file, struct Pixel ***input_pixels, struct BMP_Header *BMP, struct DIB_Header *DIB) {
+    // read BMP header and DIB header from input file
+    readBMPHeader(input_file, BMP);
+    readDIBHeader(input_file, DIB);
+
+    *input_pixels = create_pixel_array_2d(DIB->image_width_w, DIB->image_height_h);
+
+    // readPixels into pixel array
+    readPixelsBMP(input_file, *input_pixels, DIB->image_width_w, DIB->image_height_h);
+    fclose(input_file);
+}
+
+void write_output_file(FILE *output_file, Image *image, struct Pixel **new_pixels, struct BMP_Header BMP, struct DIB_Header DIB) {
+    // write new headers and pixels to output file
+    writeBMPHeader(output_file, &BMP);
+    writeDIBHeader(output_file, &DIB);
+    writePixelsBMP(output_file, new_pixels, image_get_width(image),
+                   image_get_height(image));
+
+    fclose(output_file);
+}
+
+void display_usage(char **argv) {
+    fprintf(stderr,
+            "Usage: %s -i <input file> -o <output file> -f <filter>\n",
+            argv[0]);
 }
