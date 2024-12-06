@@ -62,7 +62,7 @@ struct thread_data {
 
 struct Pixel **create_pixel_array_2d(int width, int height);
 
-void free_pixel_array_2d(struct Pixel **array, int width, int height);
+void free_pixel_array_2d(struct Pixel **array, int height);
 
 /** Creates a new image and returns it.
 * 

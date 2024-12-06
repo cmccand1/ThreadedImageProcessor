@@ -2,7 +2,6 @@
 #include <getopt.h>
 #include <math.h>
 #include <pthread.h>
-#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -20,9 +19,9 @@ void process_user_args(int argc, char **argv, FILE **input_file, FILE **output_f
 
 void extract_input_image_data(FILE *input_file, struct Pixel ***input_pixels, struct BMP_Header *BMP, struct DIB_Header *DIB);
 
-void write_output_file(FILE *output_file, Image *image, struct Pixel **new_pixels, struct BMP_Header BMP, struct DIB_Header DIB);
+void write_output_file(FILE *output_file, const Image *image, struct Pixel **new_pixels, struct BMP_Header BMP, struct DIB_Header DIB);
 
-void do_filter(Image *input_image, filter_method filter_func, struct thread_data ***job_data, pthread_t tids[THREAD_COUNT]);
+void do_filter(const Image *input_image, filter_method filter_func, struct thread_data ***job_data, pthread_t tids[THREAD_COUNT]);
 
 void write_output_pixels(struct Pixel **output_pixels, struct thread_data **job_data);
 
@@ -70,7 +69,7 @@ int main(int argc, char *argv[]) {
     // clean up
     for (int i = 0; i < THREAD_COUNT; ++i) {
         free_pixel_array_2d(job_data[i]->thread_pixel_array,
-                            job_data[i]->width, job_data[i]->height);
+                            job_data[i]->height);
         // free the thread_info struct
         free(job_data[i]);
         job_data[i] = NULL;
@@ -83,7 +82,7 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
-void do_filter(Image *input_image, filter_method filter_func, struct thread_data ***job_data, pthread_t tids[THREAD_COUNT]) {
+void do_filter(const Image *input_image, filter_method filter_func, struct thread_data ***job_data, pthread_t tids[THREAD_COUNT]) {
     if (init_thread_data(job_data, input_image) != EXIT_SUCCESS) {
         perror("Error initializing thread info.");
         exit(EXIT_FAILURE);
@@ -91,7 +90,7 @@ void do_filter(Image *input_image, filter_method filter_func, struct thread_data
 
     // create the threads, which call filter with error handling
     for (int i = 0; i < THREAD_COUNT; ++i) {
-        if (pthread_create(&tids[i], NULL, filter_func, (void*)(*job_data)[i]) != EXIT_SUCCESS) {
+        if (pthread_create(&tids[i], NULL, filter_func, (*job_data)[i]) != EXIT_SUCCESS) {
             perror("Error creating thread.");
             exit(EXIT_FAILURE);
         }
@@ -140,7 +139,6 @@ int init_thread_data(struct thread_data ***thread_data, const Image *image) {
         // Set basic thread properties
         (*thread_data)[i]->height = image->height;
         (*thread_data)[i]->og_image = image;
-        // (*thread_data)[i]->filter_type = filter_type;
 
         // Calculate thread's section boundaries
         if (i == 0) {
@@ -231,7 +229,8 @@ void extract_input_image_data(FILE *input_file, struct Pixel ***input_pixels, st
     fclose(input_file);
 }
 
-void write_output_file(FILE *output_file, Image *image, struct Pixel **new_pixels, struct BMP_Header BMP, struct DIB_Header DIB) {
+void write_output_file(FILE *output_file, const Image *image, struct Pixel **new_pixels, const struct BMP_Header BMP,
+                       const struct DIB_Header DIB) {
     // write new headers and pixels to output file
     writeBMPHeader(output_file, &BMP);
     writeDIBHeader(output_file, &DIB);
